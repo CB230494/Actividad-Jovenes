@@ -21,7 +21,7 @@ BOOKS = [
 ]
 INDEX = {b: i for i, b in enumerate(BOOKS)}
 
-# “Complicadas”: prioriza libros menos obvios (puedes modificar)
+# Pool de libros "más difíciles" (más probabilidad de aparecer)
 HARD_SET = set([
     "Abdías","Nahúm","Habacuc","Sofonías","Hageo","Zacarías","Malaquías",
     "Filemón","Judas","2 Juan","3 Juan","2 Pedro","2 Tesalonicenses",
@@ -36,36 +36,29 @@ def normalize_pair(a: str, b: str):
     """Para que (A,B) y (B,A) cuenten como la misma pregunta y no se repitan."""
     return tuple(sorted([a, b], key=lambda x: INDEX[x]))
 
-def pick_book(pool):
-    return random.choice(pool)
-
 def make_question(used_pairs: set, avoid_too_obvious=True):
     """
     Genera una pregunta no repetida:
     - statement: texto
-    - correct: True/False
-    - meta: (a, b, relation)
+    - truth: bool correcto
     """
 
-    # Pool “difícil” (mayor probabilidad) + resto (por si no alcanza)
     hard_list = [b for b in BOOKS if b in HARD_SET]
-    normal_list = [b for b in BOOKS if b not in HARD_SET]
 
-    for _ in range(5000):
-        # 75% de probabilidad de tomar “difícil”
-        a = pick_book(hard_list if random.random() < 0.75 else BOOKS)
-        b = pick_book(hard_list if random.random() < 0.75 else BOOKS)
+    for _ in range(6000):
+        # 75% de probabilidad de que cada libro venga del pool difícil
+        a = random.choice(hard_list if random.random() < 0.75 else BOOKS)
+        b = random.choice(hard_list if random.random() < 0.75 else BOOKS)
 
         if a == b:
             continue
 
-        # Evitar pares “demasiado obvios”: uno del AT y otro del NT con extremos grandes
         if avoid_too_obvious:
             dist = abs(INDEX[a] - INDEX[b])
-            # Evita distancias enormes (tipo Génesis vs Apocalipsis)
+            # Evita muy obvias (extremos)
             if dist > 45:
                 continue
-            # Evita distancias demasiado pequeñas (sería muy fácil si son casi consecutivos)
+            # Evita demasiado pegadas (sería muy fácil)
             if dist < 2:
                 continue
 
@@ -73,10 +66,8 @@ def make_question(used_pairs: set, avoid_too_obvious=True):
         if pair_key in used_pairs:
             continue
 
-        # Elegir relación a preguntar
         relation = random.choice(["antes", "después"])
 
-        # Determinar la verdad real de la afirmación
         if relation == "antes":
             truth = is_before(a, b)
             statement = f"📖 **{a}** está **antes** que **{b}**."
@@ -84,14 +75,9 @@ def make_question(used_pairs: set, avoid_too_obvious=True):
             truth = (not is_before(a, b))
             statement = f"📖 **{a}** está **después** que **{b}**."
 
-        # Para que haya V/F variado: a veces invertimos el enunciado
-        # (Ej: si era verdadero, lo hacemos falso cambiando el orden)
+        # Para variar V/F: 50% invertimos el orden y recalculamos
         if random.random() < 0.5:
-            # Cambiar orden de libros y recalcular
-            a2, b2 = b, a
-            pair_key2 = normalize_pair(a2, b2)
-            # pair_key2 == pair_key, sigue sin repetición
-            a, b = a2, b2
+            a, b = b, a
             if relation == "antes":
                 truth = is_before(a, b)
                 statement = f"📖 **{a}** está **antes** que **{b}**."
@@ -100,14 +86,14 @@ def make_question(used_pairs: set, avoid_too_obvious=True):
                 statement = f"📖 **{a}** está **después** que **{b}**."
 
         used_pairs.add(pair_key)
-        return statement, truth, (a, b, relation)
+        return statement, truth
 
     raise RuntimeError("No se pudo generar una pregunta única. Ajusta filtros.")
 
 # ----------------------------
-# Estado / lógica del juego
+# Estado del juego
 # ----------------------------
-TOTAL_QUESTIONS = 15
+TOTAL_QUESTIONS = 20  # ✅ número par
 
 def init_game():
     st.session_state.started = True
@@ -116,24 +102,21 @@ def init_game():
     st.session_state.red = 0
     st.session_state.blue = 0
     st.session_state.history = []  # (q#, team, statement, answer, correct)
-    st.session_state.current = None  # (statement, truth, meta)
+    st.session_state.current = None  # (statement, truth)
 
 def current_team():
-    # Alterna turnos: 0 -> Rojo, 1 -> Azul, 2 -> Rojo...
+    # Alterna turnos: 0->Rojo, 1->Azul, 2->Rojo...
     return "🔴 Rojo" if st.session_state.q_index % 2 == 0 else "🔵 Azul"
 
-def team_color(team_name: str):
-    return "red" if "Rojo" in team_name else "blue"
-
 def next_question():
-    statement, truth, meta = make_question(
+    statement, truth = make_question(
         st.session_state.used_pairs,
         avoid_too_obvious=True
     )
-    st.session_state.current = (statement, truth, meta)
+    st.session_state.current = (statement, truth)
 
 def answer(choice: bool):
-    statement, truth, _meta = st.session_state.current
+    statement, truth = st.session_state.current
     team = current_team()
     ok = (choice == truth)
 
@@ -170,7 +153,7 @@ with controls[0]:
         init_game()
 
 with controls[1]:
-    st.caption("15 preguntas · turnos alternos")
+    st.caption("20 preguntas · turnos alternos")
 
 with controls[2]:
     if st.session_state.get("started", False):
@@ -180,7 +163,7 @@ if not st.session_state.get("started", False):
     st.info("Presiona **Iniciar / Reiniciar juego** para comenzar.")
     st.stop()
 
-# Si terminó el juego
+# Fin del juego
 if st.session_state.q_index >= TOTAL_QUESTIONS:
     st.subheader("🏁 Resultado final")
 
@@ -198,11 +181,11 @@ if st.session_state.q_index >= TOTAL_QUESTIONS:
             st.write(f"**{qn}. {team}** → {stmt}  \nRespuesta: **{ans_txt}** → {'✅' if ok else '❌'}")
     st.stop()
 
-# Si no hay pregunta actual, crear una
+# Pregunta actual
 if st.session_state.current is None:
     next_question()
 
-statement, truth, _meta = st.session_state.current
+statement, truth = st.session_state.current
 team = current_team()
 
 st.subheader(f"Turno de: {team}")
@@ -221,7 +204,7 @@ with btn2:
 
 with st.expander("📌 Reglas rápidas"):
     st.write("- 1 punto si acierta, 0 si falla.")
-    st.write("- 15 preguntas, sin repetición de pares de libros.")
+    st.write("- 20 preguntas, sin repetición de pares de libros.")
     st.write("- Turnos alternos: Rojo, Azul, Rojo, Azul…")
 
 
