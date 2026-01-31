@@ -21,32 +21,25 @@ BOOKS = [
 ]
 INDEX = {b: i for i, b in enumerate(BOOKS)}
 
-# Pool de libros "más difíciles" (más probabilidad de aparecer)
-HARD_SET = set([
+# Pool de libros más "difíciles"
+HARD_SET = {
     "Abdías","Nahúm","Habacuc","Sofonías","Hageo","Zacarías","Malaquías",
     "Filemón","Judas","2 Juan","3 Juan","2 Pedro","2 Tesalonicenses",
     "2 Timoteo","Tito","Colosenses","1 Tesalonicenses","Lamentaciones",
     "Cantares","Ezequiel","Amós","Miqueas","Oseas","Joel"
-])
+}
 
 def is_before(a: str, b: str) -> bool:
     return INDEX[a] < INDEX[b]
 
 def normalize_pair(a: str, b: str):
-    """Para que (A,B) y (B,A) cuenten como la misma pregunta y no se repitan."""
+    # Para que (A,B) y (B,A) cuenten como la misma pregunta
     return tuple(sorted([a, b], key=lambda x: INDEX[x]))
 
 def make_question(used_pairs: set, avoid_too_obvious=True):
-    """
-    Genera una pregunta no repetida:
-    - statement: texto
-    - truth: bool correcto
-    """
-
     hard_list = [b for b in BOOKS if b in HARD_SET]
 
     for _ in range(6000):
-        # 75% de probabilidad de que cada libro venga del pool difícil
         a = random.choice(hard_list if random.random() < 0.75 else BOOKS)
         b = random.choice(hard_list if random.random() < 0.75 else BOOKS)
 
@@ -55,11 +48,7 @@ def make_question(used_pairs: set, avoid_too_obvious=True):
 
         if avoid_too_obvious:
             dist = abs(INDEX[a] - INDEX[b])
-            # Evita muy obvias (extremos)
-            if dist > 45:
-                continue
-            # Evita demasiado pegadas (sería muy fácil)
-            if dist < 2:
+            if dist > 45 or dist < 2:
                 continue
 
         pair_key = normalize_pair(a, b)
@@ -72,28 +61,28 @@ def make_question(used_pairs: set, avoid_too_obvious=True):
             truth = is_before(a, b)
             statement = f"📖 **{a}** está **antes** que **{b}**."
         else:
-            truth = (not is_before(a, b))
+            truth = not is_before(a, b)
             statement = f"📖 **{a}** está **después** que **{b}**."
 
-        # Para variar V/F: 50% invertimos el orden y recalculamos
+        # 50% invertir orden para variar V/F
         if random.random() < 0.5:
             a, b = b, a
             if relation == "antes":
                 truth = is_before(a, b)
                 statement = f"📖 **{a}** está **antes** que **{b}**."
             else:
-                truth = (not is_before(a, b))
+                truth = not is_before(a, b)
                 statement = f"📖 **{a}** está **después** que **{b}**."
 
         used_pairs.add(pair_key)
         return statement, truth
 
-    raise RuntimeError("No se pudo generar una pregunta única. Ajusta filtros.")
+    raise RuntimeError("No se pudo generar una pregunta única.")
 
 # ----------------------------
 # Estado del juego
 # ----------------------------
-TOTAL_QUESTIONS = 20  # ✅ número par
+TOTAL_QUESTIONS = 20
 
 def init_game():
     st.session_state.started = True
@@ -101,19 +90,18 @@ def init_game():
     st.session_state.used_pairs = set()
     st.session_state.red = 0
     st.session_state.blue = 0
-    st.session_state.history = []  # (q#, team, statement, answer, correct)
-    st.session_state.current = None  # (statement, truth)
+    st.session_state.history = []
+    st.session_state.current = None
+    st.session_state.last_feedback = None  # ← mensaje de acierto/error
 
 def current_team():
-    # Alterna turnos: 0->Rojo, 1->Azul, 2->Rojo...
-    return "🔴 Rojo" if st.session_state.q_index % 2 == 0 else "🔵 Azul"
+    return "🔴 Equipo Rojo" if st.session_state.q_index % 2 == 0 else "🔵 Equipo Azul"
 
 def next_question():
-    statement, truth = make_question(
+    st.session_state.current = make_question(
         st.session_state.used_pairs,
         avoid_too_obvious=True
     )
-    st.session_state.current = (statement, truth)
 
 def answer(choice: bool):
     statement, truth = st.session_state.current
@@ -125,6 +113,9 @@ def answer(choice: bool):
             st.session_state.red += 1
         else:
             st.session_state.blue += 1
+        st.session_state.last_feedback = ("ok", f"{team} **ACERTÓ** 🎉 (+1 punto)")
+    else:
+        st.session_state.last_feedback = ("fail", f"{team} **FALLÓ** ❌ (+0 puntos)")
 
     st.session_state.history.append(
         (st.session_state.q_index + 1, team, statement, choice, ok)
@@ -136,10 +127,14 @@ def answer(choice: bool):
 # ----------------------------
 # UI
 # ----------------------------
-st.set_page_config(page_title="Batalla Bíblica: Antes o Después", page_icon="📖", layout="centered")
+st.set_page_config(
+    page_title="Batalla Bíblica: Antes o Después",
+    page_icon="📖",
+    layout="centered"
+)
 
 st.title("📖 Batalla Bíblica: ¿Antes o Después?")
-st.write("Dos equipos compiten respondiendo **Verdadero/Falso** sobre el orden de los libros de la Biblia.")
+st.write("Dos equipos responden **Verdadero / Falso** sobre el orden de los libros de la Biblia.")
 
 colA, colB = st.columns(2)
 with colA:
@@ -163,11 +158,19 @@ if not st.session_state.get("started", False):
     st.info("Presiona **Iniciar / Reiniciar juego** para comenzar.")
     st.stop()
 
+# Mostrar feedback del turno anterior
+if st.session_state.get("last_feedback"):
+    kind, msg = st.session_state.last_feedback
+    if kind == "ok":
+        st.success(msg)
+    else:
+        st.error(msg)
+
 # Fin del juego
 if st.session_state.q_index >= TOTAL_QUESTIONS:
     st.subheader("🏁 Resultado final")
-
     r, b = st.session_state.red, st.session_state.blue
+
     if r > b:
         st.success(f"Ganó **🔴 Equipo Rojo** con {r} puntos 🎉")
     elif b > r:
@@ -178,7 +181,10 @@ if st.session_state.q_index >= TOTAL_QUESTIONS:
     with st.expander("📜 Ver historial de preguntas"):
         for qn, team, stmt, ans, ok in st.session_state.history:
             ans_txt = "Verdadero" if ans else "Falso"
-            st.write(f"**{qn}. {team}** → {stmt}  \nRespuesta: **{ans_txt}** → {'✅' if ok else '❌'}")
+            st.write(
+                f"**{qn}. {team}** → {stmt}  \n"
+                f"Respuesta: **{ans_txt}** → {'✅' if ok else '❌'}"
+            )
     st.stop()
 
 # Pregunta actual
@@ -205,14 +211,4 @@ with btn2:
 with st.expander("📌 Reglas rápidas"):
     st.write("- 1 punto si acierta, 0 si falla.")
     st.write("- 20 preguntas, sin repetición de pares de libros.")
-    st.write("- Turnos alternos: Rojo, Azul, Rojo, Azul…")
-
-
-
-
-
-
-
-
-
-
+    st.write("- Turnos alternos: Rojo y Azul.")
